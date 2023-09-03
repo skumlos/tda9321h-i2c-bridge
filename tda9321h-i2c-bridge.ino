@@ -28,11 +28,11 @@
 
 // Version 1.0
 
-#define I2C_TIMEOUT 10000
+#define I2C_TIMEOUT 500
 #define I2C_PULLUP 0
-#define I2C_FASTMODE 0
+#define I2C_FASTMODE 1
 
-#define READ_DELTA_MS (100)
+#define READ_DELTA_MS (80)
 
 // Only have one active of these, depending on what you want.
 #define RGB_SWITCH_REG_VAL (0x3) /* IE1 and IE2 enabled */
@@ -51,13 +51,6 @@
 #define TDA9321H_ADDR (69)
 
 #define REG_RGB_SWITCH (0x0A)
-
-void setup() {
-  bool iicinit = i2c_init();
-  Wire.begin(TDA9321H_ADDR);
-  Wire.onReceive(writeRequest);
-  Wire.onRequest(readRequest);
-}
 
 void writeRegister(const uint8_t reg, const uint8_t val) {
   i2c_start((TDA9321H_ADDR<<1)|I2C_WRITE);
@@ -93,8 +86,8 @@ void writeRequest(int byteCount) {
       break;
     }
   }
-  writeState = WR_REG;
   i2c_stop();
+  writeState = WR_REG;
 }
 
 uint8_t r[4] = {0, 0, 0, 0};
@@ -113,12 +106,16 @@ void read() {
 }
 
 unsigned int last = 0;
+
+void setup() {
+  bool iicinit = i2c_init();
+  Wire.begin(TDA9321H_ADDR);
+  Wire.onReceive(writeRequest);
+  Wire.onRequest(readRequest);
+}
+
 // Constantly read the status regs to be able to serve them back upon request
 void loop() {
-  if((millis() - last) > READ_DELTA_MS) {
-    noInterrupts();
     read();
-    interrupts();
-    last = millis();
-  }
+    delay(READ_DELTA_MS);
 }
