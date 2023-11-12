@@ -14,6 +14,13 @@
  *
  * On the Barco ADVM14, SCL is R45 and SDA is R44
  *
+ * If the TDA8540 sniffer https://github.com/skumlos/tda8540-sniffer is used
+ * to provide selected channel information for auto blanking on CODED A, connect
+ * D13 from the Arduino where that runs, to D9 on the Arduino running this. Then
+ * connect D13 from this through a voltage divider consisting of 2x1K resistors,
+ * and connect the resulting voltage from the divider to the blanking pin of
+ * the TDA9321H IC. 
+ *
  * A speedy Arduino is recommended, for now only tested on:
  * - 16MHz Mini Pro clone thingy
  * 
@@ -26,7 +33,7 @@
  * Expect your monitor to catch fire!
  */
 
-// Version 1.0
+// Version 1.1
 
 #define I2C_TIMEOUT 500
 #define I2C_PULLUP 0
@@ -47,10 +54,17 @@
 #include <SoftI2CMaster.h>
 #include <Wire.h>
 
+#define GPIO_BLANKING	(13) // LED
+#define GPIO_CHANNEL_IN	(9) // From TDA8540 sniffer 
+
 // Address is 10001X1Y, X=<AS pin>=0/GND on ADVM14, Y=R/W
 #define TDA9321H_ADDR (69)
 
-#define REG_RGB_SWITCH (0x0A)
+#define REG_VIDEO_SWITCH0 (0x08)
+#define REG_VIDEO_SWITCH1 (0x09)
+#define REG_RGB_SWITCH    (0x0A)
+
+bool cvbs_selected = false;
 
 void writeRegister(const uint8_t reg, const uint8_t val) {
   i2c_start((TDA9321H_ADDR<<1)|I2C_WRITE);
@@ -80,8 +94,14 @@ void writeRequest(int byteCount) {
       break;
       case WR_DATA:
         w[currentReg] = Wire.read();
-        if(REG_RGB_SWITCH == currentReg)
-          w[currentReg] |= RGB_SWITCH_REG_VAL;
+        switch(currentReg) {
+          case REG_VIDEO_SWITCH0:
+            cvbs_selected = w[currentReg] & 0x02;
+         break;
+          case REG_RGB_SWITCH:
+            w[currentReg] |= RGB_SWITCH_REG_VAL;
+          break;
+        }
         i2c_write(w[currentReg++]);
       break;
     }
@@ -90,7 +110,7 @@ void writeRequest(int byteCount) {
   writeState = WR_REG;
 }
 
-uint8_t r[4] = {0, 0, 0, 0};
+uint8_t r[4] = {0x80, 0, 0, 0};
 
 void readRequest() {
   Wire.write(r,4);
@@ -109,13 +129,30 @@ unsigned int last = 0;
 
 void setup() {
   bool iicinit = i2c_init();
+  pinMode(GPIO_BLANKING,OUTPUT);
+  digitalWrite(GPIO_BLANKING,HIGH);
+  pinMode(GPIO_CHANNEL_IN,INPUT_PULLUP);
+
   Wire.begin(TDA9321H_ADDR);
   Wire.onReceive(writeRequest);
   Wire.onRequest(readRequest);
 }
 
+bool blanking = false;
+
 // Constantly read the status regs to be able to serve them back upon request
 void loop() {
     read();
+    if(cvbs_selected) {
+      if(digitalRead(GPIO_CHANNEL_IN) == LOW) {
+        if(!blanking) {
+          digitalWrite(GPIO_BLANKING,HIGH);
+          blanking = true;
+        }
+      } else if(blanking) {
+          digitalWrite(GPIO_BLANKING,LOW);
+          blanking = false;
+      }
+    }
     delay(READ_DELTA_MS);
 }
